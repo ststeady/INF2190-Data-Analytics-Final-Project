@@ -1,0 +1,235 @@
+---
+title: "Group 2 INF2190 Final Project"
+output:
+  pdf_document: default
+  html_document: default
+date: "2023-11-20"
+author: "Junwei Shen"
+---
+
+```{r, warning = FALSE}
+# Reading necessary libraries
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(RColorBrewer)
+library(corrplot)
+library(gridExtra)
+library(tree)
+library(rpart.plot)
+library(ISLR2)
+```
+
+# 1. EDA and Data Visualization
+
+```{r}
+# Glimpse of the dataset
+head(Boston)
+```
+
+```{r}
+# Investigate if there are any missing/null values
+sum(is.na(Boston))
+```
+
+```{r}
+# Variable Summary Stats
+summary(Boston)
+```
+
+```{r}
+# Histogram of Crime Rate
+h1 <- ggplot(Boston, aes(x = crim)) + 
+    geom_histogram(binwidth = 2.5, fill = "#00CCFF", color = "black") +
+    labs(x = "Crime Rate", 
+         y = "Frequency") +
+    theme_minimal()
+# Histogram of Median Value of Owner-Occupied Homes
+h2 <- ggplot(Boston, aes(x = medv)) + 
+    geom_histogram(binwidth = 2.5, fill = "#FF6666", color = "black") +
+    labs(x = "Median Value of Owner-Occupied Homes", 
+         y = "Frequency") +
+    theme_minimal()
+
+grid.arrange(h1, h2, nrow = 1, ncol = 2)
+```
+
+```{r}
+# Heatmap
+corr_matrix <- cor(Boston)
+corrplot(corr_matrix, method = "circle",
+         tl.col = "black", # Change text (label) color
+         tl.srt = 45,    # Rotate text labels
+         tl.cex = 1.2,   # Change text size
+         col = colorRampPalette(brewer.pal(10, "RdYlBu"))(200), # Change color palette
+         order = "hclust", # Order variables using hierarchical clustering
+)
+```
+```{r}
+# correlation plot
+pairs(~ medv + crim + indus + nox + rm + age + rad + tax + ptratio + lstat, 
+      data = Boston, 
+      main = "Boston Data",
+      pch = 19,          # Use solid dots
+      cex = 0.4,         # Smaller dot size
+      col = "darkblue"
+     )
+```
+
+```{r, message = FALSE}
+# Scatterplot of Rooms vs Median value of owner-occupied homes
+s1 <- ggplot(Boston, aes(x=rm, y=medv)) + geom_point() + geom_smooth(method="lm") + labs(x="Average Number of Rooms", y="Median value of owner-occupied homes")
+
+# Scatterplot of % Lower Status of the Population vs Median value of owner-occupied homes
+s2 <- ggplot(Boston, aes(x=lstat, y=medv)) + geom_point() + geom_smooth(method="lm") + labs(x="% Lower Status of the Population", y="Median value of owner-occupied homes")
+
+grid.arrange(s1, s2, nrow = 1, ncol = 2)
+```
+
+```{r}
+# Convert "chas" integer variable into categorical variable, since its is a dummy variable (1 if tract bounds Charles river; 0 otherwise), only do the manipulation on a copied dataframe, so that it wouldn't effect others
+Boston_copy <- Boston
+Boston_copy$chas <- factor(Boston$chas, levels = c(0, 1), labels = c("0", "1"))
+# Boxplot of Median Value of Owner-occupied Homes by Charles River Proximity
+ggplot(Boston_copy, aes(x = factor(chas), y = medv)) +
+    geom_boxplot(fill = "#00CCFF", color = "black") +
+    labs(x = "Charles River Proximity (0 = Away, 1 = Near)",
+         y = "Median Value of Owner-occupied Homes") +
+    theme_minimal()
+```
+
+```{r}
+# Unpaired t-test, used for comparing two different, independent groups. Two-sample t-test, used when comparing two different groups. Two-sided t-test, because we want to investigate on the behavior on both sides
+t.test(medv ~ chas, data = Boston, paired = FALSE, var.equal = FALSE, conf.level = 0.95)
+# The resulted p-value of 0.003567 is less than an alpha = 0.05, meaning that we have evidence against the null hypothesis, and we can conclude that there is some difference in the means of the MEDV between houses that are bounded by Charles River and the houses not bounded by Charles River.
+```
+
+
+# 2. Linear Regression
+
+```{r}
+# Building a simple linear regression to investigate the outcome medv
+# Selecting because rm and lstat have the highest correlation values (positive and negative)
+simple_model_1 <- lm(medv ~ rm, data=Boston)
+summary(simple_model_1)
+simple_model_2 <- lm(medv ~ lstat, data=Boston)
+summary(simple_model_2)
+```
+
+```{r}
+# Building a Generalized Linear Model, assuming a Gaussian, building an "overfitting" model and remove insignificant features
+glm_model_full <- glm(medv ~ crim + zn + indus + chas + nox + rm + age + dis + rad + tax + ptratio + lstat, family=gaussian, data=Boston_copy)  
+summary(glm_model_full)
+# indus, age shows non-significant p-value, can be removed
+```
+
+```{r}
+# Backward Elimination Approach starting from full model
+# Building new glm model without indus, age attributes, finding out that zn attribute is not significant with respect to other attributes, and removing zn can significantly help reduce AIC.
+# I have also considered the correlation between rm and lstat attributes, and fit the correlation effect as a new variable. Below is our final model.
+glm_model_1 <- glm(medv ~ crim + chas + nox + rm + dis + rad + tax + ptratio + lstat + rm:lstat, family=gaussian, data=Boston_copy)  
+summary(glm_model_1)
+```
+
+```{r}
+# Forward Addition Approach starting from two most significant attributes, adding more attributes from the selected attributes in glm_model_1, if the attribute shows a relatively small p-value and significantly influence the AIC, we would include that attribute in our new model. Below is our final model
+glm_model_2 <- glm(medv ~  rm + lstat + rm:lstat + crim + dis + ptratio, family=gaussian, data=Boston_copy)  
+summary(glm_model_2)
+```
+
+```{r}
+par(mfrow=c(2,2))
+m1 <- plot(simple_model_1)
+m2 <-plot(simple_model_2)
+m3 <-plot(glm_model_1)
+m4 <-plot(glm_model_2)
+```
+
+```{r}
+# Finding r-sqaured, AIC and BIC value to evaluate model
+rsq_simple_model_1 <- summary(simple_model_1)$r.squared
+rsq_simple_model_2 <-summary(simple_model_2)$r.squared
+rsq_glm_model_1 <-with(summary(glm_model_1), 1 - deviance/null.deviance)
+rsq_glm_model_2 <-with(summary(glm_model_2), 1 - deviance/null.deviance)
+
+
+aic_simple_model_1 <- AIC(simple_model_1)
+aic_simple_model_2 <- AIC(simple_model_2)
+aic_glm_model_1 <- AIC(glm_model_1)
+aic_glm_model_2 <- AIC(glm_model_2)
+
+bic_simple_model_1 <- BIC(simple_model_1)
+bic_simple_model_2 <- BIC(simple_model_2)
+bic_glm_model_1 <- BIC(glm_model_1)
+bic_glm_model_2 <- BIC(glm_model_2)
+
+models_comparison <- data.frame(
+  Model = c("Simple Model 1", "Simple Model 2", "GLM Model 1", "GLM Model 2"),
+  R_squared = c(rsq_simple_model_1, rsq_simple_model_2, rsq_glm_model_1, rsq_glm_model_2),
+  AIC_Value = c(aic_simple_model_1, aic_simple_model_2, aic_glm_model_1, aic_glm_model_2),
+  BIC_Value = c(bic_simple_model_1, bic_simple_model_2, bic_glm_model_1, bic_glm_model_2)
+)
+
+print(models_comparison)
+```
+
+
+# 3. Logistic Regression
+
+```{r}
+# Converting medv into binary outcomes (i.e. define a new attribute "high_value")
+median_value <- median(Boston_copy$medv)
+# Adopting the "best" model (glm_model_1) in our former linear regression, selecting same attributes, except that crim shows a relatively insignificant p-value, so I removed it
+Boston_copy$high_value <- as.factor(ifelse(Boston$medv > median_value, 1, 0))
+logistic_model <- glm(high_value ~ chas + nox + rm + dis + rad + tax + ptratio + lstat + rm:lstat, 
+                      family=binomial, data=Boston_copy)
+summary(logistic_model)
+```
+
+```{r}
+# Predicting and converting probabilities to binary outcome
+fitted_results <- predict(logistic_model, type = "response")
+fitted_results_bin <- ifelse(fitted_results > 0.5, 1, 0)
+
+# Creating a confusion matrix
+table(Boston_copy$high_value, fitted_results_bin)
+
+# row by row: TN(0,0), FP(0,1), FN(1,0), TP(1,1)
+```
+
+```{r}
+# Accuracy Score
+accuracy <- mean(fitted_results_bin == Boston_copy$high_value)
+print(accuracy)
+```
+
+# 4. Decision Tree
+
+```{r}
+# Fit the decision tree model, adopting glm_model_1 again but removing interaction term
+tree_model <- tree(medv ~ crim + chas + nox + rm + dis + rad + tax + ptratio + lstat, data=Boston_copy)
+```
+
+```{r}
+plot(tree_model)
+text(tree_model, pretty=0)
+```
+
+```{r}
+# Creating a train-test split
+set.seed(121) # For reproducibility
+train_indices <- sample(1:nrow(Boston_copy), nrow(Boston_copy) * 0.7)
+train_data <- Boston_copy[train_indices, ]
+test_data <- Boston_copy[-train_indices, ]
+
+# Fit the model on training data
+tree_model_train <- tree(medv ~ crim + chas + nox + rm + dis + rad + tax + ptratio + lstat, data=train_data)
+
+# Predict on test data
+predictions <- predict(tree_model_train, test_data)
+
+# Calculate RMSE or any other metric
+rmse <- sqrt(mean((predictions - test_data$medv)^2))
+print(rmse)
+```
+
